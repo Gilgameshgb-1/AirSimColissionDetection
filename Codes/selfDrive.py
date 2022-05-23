@@ -1,37 +1,56 @@
-# ready to run example: PythonClient/car/hello_car.py
 import airsim
+import cv2
+import numpy as np 
+import pprint
 import time
 
-# connect to the AirSim simulator
 client = airsim.CarClient()
 client.confirmConnection()
+
 client.enableApiControl(True)
 car_controls = airsim.CarControls()
+car_controls.is_manual_gear = True
+
+#incijalizacija kamere
+camera_name = "0"
+image_type = airsim.ImageType.Scene
+
+#detection radius u centimetrima i objekti koje prihvatamo da smo detektovali
+client.simSetDetectionFilterRadius(camera_name, image_type, 200 * 100) 
+client.simAddDetectionFilterMeshName(camera_name, image_type, "Cylinder*") 
+client.simAddDetectionFilterMeshName(camera_name, image_type, "Cone*")  
+client.simAddDetectionFilterMeshName(camera_name, image_type, "OrangeBall*") 
 
 while True:
-    # get state of the car
-    car_state = client.getCarState()
-    print("Speed %d, Gear %d" % (car_state.speed, car_state.gear))
 
-    # set the controls for car
-    car_controls.throttle = 1
-    car_controls.steering = 1
-    client.setCarControls(car_controls)
+    rawImage = client.simGetImage(camera_name, image_type)
+    if not rawImage:
+        continue
+    png = cv2.imdecode(airsim.string_to_uint8_array(rawImage), cv2.IMREAD_UNCHANGED)
+    objects = client.simGetDetections(camera_name, image_type)
+    if objects:
+        for object in objects:
+            print("Objekat: %s" % object) 
 
-    # let car drive a bit
-    time.sleep(1)
-
-    # get camera images from the car
-    responses = client.simGetImages([
-        airsim.ImageRequest(0, airsim.ImageType.DepthVis),
-        airsim.ImageRequest(1, airsim.ImageType.DepthPlanar, True)])
-    print('Retrieved images: %d', len(responses))
-
-    # do something with images
-    for response in responses:
-        if response.pixels_as_float:
-            print("Type %d, size %d" % (response.image_type, len(response.image_data_float)))
-            airsim.write_pfm('py1.pfm', airsim.get_pfm_array(response))
-        else:
-            print("Type %d, size %d" % (response.image_type, len(response.image_data_uint8)))
-            airsim.write_file('py1.png', response.image_data_uint8)
+    data_car = client.getDistanceSensorData(vehicle_name="mojeAuto")
+    state_car = client.getCarState()
+    print(f"Car speed: {state_car.speed}")
+    print(f"Distance sensor data: Car1: {data_car.distance}")
+    if data_car.distance > 15:
+        car_controls.manual_gear = 1
+        car_controls.throttle = 0.3
+        client.setCarControls(car_controls)
+    if data_car.distance <= 15:
+        car_controls.brake = 1
+        car_controls.throttle = 0
+        client.setCarControls(car_controls)
+        if(state_car.speed <= 0.5):
+            time.sleep(2)
+    if state_car.speed == 0:
+        car_controls.brake = 0
+        car_controls.manual_gear = -1
+        car_controls.throttle = -1
+        client.setCarControls(car_controls)
+        time.sleep(3)
+#Opis koda, auto ide pravo, na 15 metara udaljenosti stane
+#krene u rikverc i ponavlja to
